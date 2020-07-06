@@ -28,4 +28,36 @@ fn main() {
         let line = input_line.trim_right().to_string(); // width characters, each either 0 or .
         lines.push(line);
     }
+
+    for (y, line) in lines.iter().enumerate() {
+        for (x, c) in line.chars().enumerate() {
+            match c {
+                // there is a cell
+                '0' => {
+                    let right = search(x, y, 1, 0, &lines);
+                    let down = search(x, y, 0, 1, &lines);
+                    println!("{} {} {} {}", x, y, right, down);
+                },
+                _ => {}
+            }
+        }
+    }
+}
+
+fn search(x: usize, y: usize, offset_x: usize, offset_y: usize, lines: &Vec<String>) -> String {
+    return if y >= lines.len() || x >= lines[y].len() {
+        String::from("-1 -1")
+    } else if has_cell(x + offset_x, y + offset_y, lines) {
+        format!("{} {}", x + offset_x, y + offset_y)
+    } else {
+        search(x + offset_x, y + offset_y, offset_x, offset_y, lines)
+    }
+}
+
+fn has_cell(x: usize, y: usize, lines: &Vec<String>) -> bool {
+    return x >= 0 &&
+            y >= 0 &&
+            y < lines.len() &&
+            x < lines[y].len()  &&
+            lines[y].chars().nth(x).unwrap() == '0'
 }
