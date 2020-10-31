@@ -48,7 +48,7 @@ struct Offset {
 impl Offset {
     // will return a vec containing this moves on rotation 0°, 90°, 180° and 270°
     // Probably not the most rust idiomatic way to do it ?
-    fn all_axis(offsets: &Vec<Offset>) -> Vec<Offset> {
+    fn all_axis(offsets: &Vec<Offset>) -> Vec<Vec<Offset>> {
         let axis1 = offsets.clone();
         let axis2: Vec<Offset> = offsets.iter().map(|offset| Offset {
             col: -offset.row,
@@ -62,7 +62,7 @@ impl Offset {
             col: offset.row,
             row: -offset.col,
         }).collect();
-        [axis1, axis2, axis3, axis4].concat()
+        vec![axis1, axis2, axis3, axis4]
     }
     fn rotate_90_cw(offsets: &Vec<Offset>) -> Vec<Offset> {
         offsets.iter().map(|offset| Offset {
@@ -76,10 +76,10 @@ impl Offset {
 struct Piece {
     white: bool,
     c: char,
-    allowed_moves: Vec<Offset>,
+    allowed_moves: Vec<Vec<Offset>>,
 }
 impl Piece {
-    fn new(white: bool, c: char, allowed_moves: Vec<Offset>) -> Piece {
+    fn new(white: bool, c: char, allowed_moves: Vec<Vec<Offset>>) -> Piece {
         let piece = Piece {
             white,
             c: if white { c.to_uppercase().next().unwrap() } else { c.to_lowercase().next().unwrap() },
@@ -104,13 +104,13 @@ fn main() {
     let l: Vec<Offset> = vec![Offset { col: 1, row: -2 }];
     let rev_l: Vec<Offset> = vec![Offset { col: -1, row: -2 }];
     // ignoring the special first move rule. It's a final board. Fingers crossed hoping it doesn't pop up. Ignoring also diag mvt rule has it's not relevant here
-    let black_pawn = Piece::new(false, 'p', vec![Offset { col: 0, row: -1 }, Offset { col: -1, row: -1 }, Offset { col: 1, row: -1 }]);
-    let white_pawn = Piece::new(true, 'p', vec![Offset { col: 0, row: 1 }, Offset { col: -1, row: 1 }, Offset { col: 1, row: 1 }]);
-    let white_king = Piece::new(true, 'k', [white_pawn.allowed_moves.clone(), black_pawn.allowed_moves.clone(), vec![Offset { col: 1, row: 0 }, Offset { col: -1, row: 0 }]].concat());
+    let black_pawn = Piece::new(false, 'p', vec![vec![Offset { col: 0, row: -1 }], vec![Offset { col: -1, row: -1 }], vec![Offset { col: 1, row: -1 }]]);
+    let white_pawn = Piece::new(true, 'p', vec![vec![Offset { col: 0, row: 1 }], vec![Offset { col: -1, row: 1 }], vec![Offset { col: 1, row: 1 }]]);
+    let white_king = Piece::new(true, 'k', vec![vec![Offset { col: 0, row: -1 }], vec![Offset { col: -1, row: -1 }], vec![Offset { col: 1, row: -1 }], vec![Offset { col: 0, row: 1 }], vec![Offset { col: -1, row: 1 }], vec![Offset { col: 1, row: 1 }]]);
     let white_rook = Piece::new(true, 'r', Offset::all_axis(&up));
     let white_bishop = Piece::new(true, 'b', Offset::all_axis(&diag_up_right));
     let white_queen = Piece::new(true, 'Q', [white_bishop.allowed_moves.clone(), white_rook.allowed_moves.clone()].concat());
-    let white_knight = Piece::new(true, 'K', [Offset::all_axis(&l), Offset::all_axis(&rev_l)].concat());
+    let white_knight = Piece::new(true, 'N', [Offset::all_axis(&l), Offset::all_axis(&rev_l)].concat());
     let black_rook = Piece::just_inverse_color(&white_rook);
     let black_king = Piece::just_inverse_color(&white_king);
     let black_bishop = Piece::just_inverse_color(&white_bishop);
@@ -133,6 +133,7 @@ fn main() {
     pieces.insert(black_knight.c, &black_knight);
     pieces.insert(empty.c, &empty);
 
+
     let mut base_layer = Vec::new();
     for i in 0..8 as usize {
         let mut input_line = String::new();
@@ -150,8 +151,7 @@ fn main() {
     let mut black_pos = Offset { row: 0, col: 0};
 
     let mut row: i8 = 0;
-    let base_layer_iter = &board.base_layer;
-    for line in base_layer_iter {
+    for line in &board.base_layer {
         let mut col: i8 = 0;
         for c in line.chars() {
             let piece = pieces.get(&c).unwrap();
@@ -162,15 +162,28 @@ fn main() {
                 black_pos.row = row;
                 black_pos.col = col;
             } else if piece.c != '.' { // mark the pos of you own piece
-                let mut my_layer = if !piece.white { &mut board.black_allowed } else { &mut board.white_allowed };
-                my_layer[row as usize][col as usize] = false;
+                board.black_allowed[row as usize][col as usize] = false;
+                board.white_allowed[row as usize][col as usize] = false;
             }
-            for offset in &piece.allowed_moves {
-                let col_threat: usize = (col + offset.col) as usize;
-                let row_threat: usize = (row + offset.row) as usize;
-                if col_threat >= 0 && col_threat < 8 && row_threat >= 0 && row_threat < 8 {
-                    let mut layer_to_mark = if piece.white { &mut board.black_allowed } else { &mut board.white_allowed };
-                    layer_to_mark[row_threat][col_threat] = false
+            for offsets in &piece.allowed_moves {
+                for offset in offsets {
+                    let col_threat = (col + offset.col) as usize;
+                    let row_threat = (row + offset.row) as usize;
+                    if within_bounds(col_threat) && within_bounds(row_threat) {
+                        let c = board.base_layer[row_threat].chars().nth(col_threat).unwrap();
+                        let piece_there = pieces[&c];
+                        let mut layer_to_mark = if piece.white { &mut board.black_allowed } else { &mut board.white_allowed };
+                        if piece_there.c == empty.c {
+                            layer_to_mark[row_threat][col_threat] = false;
+                        } else {
+                            if piece_there.white != piece.white {
+                                layer_to_mark[row_threat][col_threat] = false;
+                            }
+                            if piece_there.c != white_king.c && piece_there.c != black_king.c {
+                                break;
+                            }
+                        }
+                    }
                 }
             }
             col = col + 1;
@@ -179,26 +192,56 @@ fn main() {
     }
 
 
-    let can_white_be_saved = white_king.allowed_moves
-        .iter()
-        .any(|offset| {
-            let col = white_pos.col + offset.col;
-            let row = white_pos.row + offset.row;
-            if col >= 0 && col < 8 && row >= 0 && row < 8 {
-                board.white_allowed[row as usize][col as usize]
-            } else {
-                false
-            }
-        });
+    let can_white_be_saved = can_be_saved(white_king, &mut board.white_allowed, white_pos);
+    let can_black_be_saved = can_be_saved(black_king, &mut board.black_allowed, black_pos);
+
+    eprintln!("BASE");
     for x in board.base_layer {
-        eprintln!("white {:?}", x);
+        eprintln!("{:?}", x);
     }
+    eprintln!("WHITE ALLOWED");
     for row in board.white_allowed {
         for col in row {
             eprint!("{}", if col { "o " } else { "X " });
         }
         eprint!("\n");
     }
+    eprintln!("BLACK ALLOWED");
+    for row in board.black_allowed {
+        for col in row {
+            eprint!("{}", if col { "o " } else { "X " });
+        }
+        eprint!("\n");
+    }
+    eprintln!("white: {}  black: {}", can_white_be_saved, can_black_be_saved);
 
-    println!("{}", if can_white_be_saved { 'W' } else { 'B' });
+    println!("{}", if (can_white_be_saved && can_black_be_saved) || (!can_white_be_saved && !can_black_be_saved)  {
+        'N'
+    } else if can_black_be_saved {
+        'B'
+    } else {
+        'W'
+    });
+}
+
+fn within_bounds(coord: usize) -> bool {
+    coord >= 0 && coord < 8
+}
+
+fn can_be_saved(king: Piece, mut layer: &mut Vec<Vec<bool>>, mut pos: Offset) -> bool {
+    // not threaten
+    layer[pos.row as usize][pos.col as usize] ||
+    // can move
+    king.allowed_moves
+        .iter()
+        .flatten()
+        .any(|offset| {
+            let col = (pos.col + offset.col) as usize;
+            let row = (pos.row + offset.row) as usize;
+            if within_bounds(row) && within_bounds(col) {
+                layer[row as usize][col as usize]
+            } else {
+                false
+            }
+        })
 }
