@@ -27,13 +27,14 @@ use std::{io, fmt};
 use std::iter::{FromIterator, Map};
 use std::collections::HashMap;
 use std::fmt::Formatter;
+use std::borrow::Borrow;
 
 macro_rules! parse_input {
     ($x:expr, $t:ident) => ($x.trim().parse::<$t>().unwrap())
 }
 
 struct Board {
-    base_layer: Vec<String>,
+    base_layer: Vec<char>,
     // black_white: HashMap<bool, Vec<Vec<bool>>>,
     white_allowed: Vec<Vec<bool>>,
     black_allowed: Vec<Vec<bool>>,
@@ -138,62 +139,58 @@ fn main() {
     for i in 0..8 as usize {
         let mut input_line = String::new();
         io::stdin().read_line(&mut input_line).unwrap();
-        let board_row = input_line.trim_matches('\n').to_string();
+        let board_row = input_line.trim_matches('\n').to_string().chars().collect::<Vec<_>>();
         base_layer.push(board_row);
     }
     let mut board = Board {
-        base_layer,
-        // black_white: [(true, vec![vec![true; 8]; 8]), (false, vec![vec![true; 8]; 8])].iter().cloned().collect(),
+        base_layer: base_layer.concat(),
         black_allowed: vec![vec![true; 8]; 8],
         white_allowed: vec![vec![true; 8]; 8],
     };
     let mut white_pos = Offset { row: 0, col: 0};
     let mut black_pos = Offset { row: 0, col: 0};
 
-    let mut row: i8 = 0;
-    for line in &board.base_layer {
-        let mut col: i8 = 0;
-        for c in line.chars() {
-            let piece = pieces.get(&c).unwrap();
-            if piece.c == white_king.c {
-                white_pos.row = row;
-                white_pos.col = col;
-            } else if piece.c == black_king.c {
-                black_pos.row = row;
-                black_pos.col = col;
-            } else if piece.c != '.' { // mark the pos of you own piece
-                board.black_allowed[row as usize][col as usize] = false;
-                board.white_allowed[row as usize][col as usize] = false;
-            }
-            for offsets in &piece.allowed_moves {
-                for offset in offsets {
-                    let col_threat = (col + offset.col) as usize;
-                    let row_threat = (row + offset.row) as usize;
-                    if within_bounds(col_threat) && within_bounds(row_threat) {
-                        let c = board.base_layer[row_threat].chars().nth(col_threat).unwrap();
-                        let piece_there = pieces[&c];
-                        let mut layer_to_mark = if piece.white { &mut board.black_allowed } else { &mut board.white_allowed };
-                        if piece_there.c == empty.c {
+    // that indentation level is absolutely horrendous
+    for (i, c) in board.base_layer.iter().enumerate() {
+        let row: i8 = (i / 8) as i8;
+        let col: i8 = (i % 8) as i8;
+        let piece = pieces.get(&c).unwrap();
+        if piece.c == white_king.c {
+            white_pos.row = row;
+            white_pos.col = col;
+        } else if piece.c == black_king.c {
+            black_pos.row = row;
+            black_pos.col = col;
+        } else if piece.c != '.' { // mark the pos of you own piece
+            board.black_allowed[row as usize][col as usize] = false;
+            board.white_allowed[row as usize][col as usize] = false;
+        }
+        for offsets in &piece.allowed_moves {
+            for offset in offsets {
+                let col_threat = (col + offset.col) as usize;
+                let row_threat = (row + offset.row) as usize;
+                if within_bounds(col_threat) && within_bounds(row_threat) {
+                    let c = &board.base_layer[row_threat * 8 + col_threat];
+                    let piece_there = pieces[&c];
+                    let mut layer_to_mark = if piece.white { &mut board.black_allowed } else { &mut board.white_allowed };
+                    if piece_there.c == empty.c {
+                        layer_to_mark[row_threat][col_threat] = false;
+                    } else {
+                        if piece_there.white != piece.white {
                             layer_to_mark[row_threat][col_threat] = false;
-                        } else {
-                            if piece_there.white != piece.white {
-                                layer_to_mark[row_threat][col_threat] = false;
-                            }
-                            if piece_there.c != white_king.c && piece_there.c != black_king.c {
-                                break;
-                            }
+                        }
+                        if piece_there.c != white_king.c && piece_there.c != black_king.c {
+                            break;
                         }
                     }
                 }
             }
-            col = col + 1;
         }
-        row = row + 1;
     }
 
 
-    let can_white_be_saved = can_be_saved(white_king, &mut board.white_allowed, white_pos);
-    let can_black_be_saved = can_be_saved(black_king, &mut board.black_allowed, black_pos);
+    let can_white_be_saved = can_be_saved(white_king, white_pos, &mut board.white_allowed, &mut board.base_layer);
+    let can_black_be_saved = can_be_saved(black_king, black_pos, &mut board.black_allowed, &mut board.base_layer);
 
     eprintln!("BASE");
     for x in board.base_layer {
@@ -228,20 +225,21 @@ fn within_bounds(coord: usize) -> bool {
     coord >= 0 && coord < 8
 }
 
-fn can_be_saved(king: Piece, mut layer: &mut Vec<Vec<bool>>, mut pos: Offset) -> bool {
-    // not threaten
-    layer[pos.row as usize][pos.col as usize] ||
-    // can move
-    king.allowed_moves
+fn can_be_saved(king: Piece, mut king_pos: Offset, mut layer: &mut Vec<Vec<bool>>, mut base_layer: &mut Vec<char>) -> bool {
+    let not_threaten = layer[king_pos.row as usize][king_pos.col as usize];
+    let mut king_moves = king.allowed_moves
         .iter()
-        .flatten()
-        .any(|offset| {
-            let col = (pos.col + offset.col) as usize;
-            let row = (pos.row + offset.row) as usize;
-            if within_bounds(row) && within_bounds(col) {
-                layer[row as usize][col as usize]
-            } else {
-                false
-            }
-        })
+        .flatten();
+    let mut adjacents = king_moves
+        .filter(|offset| {
+            within_bounds((king_pos.row + offset.row) as usize) && within_bounds((king_pos.col + offset.col) as usize)
+        });
+    let adjacent_free = adjacents.any(|offset| {
+        layer[(king_pos.row + offset.row) as usize][(king_pos.col + offset.col) as usize]
+    });
+    let adjacent_with_enemy = adjacents.filter(|offset| {
+        !layer[(king_pos.row + offset.row) as usize][(king_pos.col + offset.col) as usize]
+    });
+
+    not_threaten || (adjacent_free)
 }
