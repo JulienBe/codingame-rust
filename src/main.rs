@@ -65,7 +65,7 @@ one integer actionCount for the number of all available client orders.
 
 Next actionCount lines: 11 space-separated values to describe a game action.
 
-- actionIdthe id of this action
+- actionId: the id of this action
 - actionType: a string
 - - BREW for a potion recipe
 - delta0, delta1, delta2, delta3: the four numbers describing the consumption/producion of ingredients for each tier.
@@ -100,9 +100,30 @@ A single line with your command:
  */
 
 use std::io;
+use crate::Action::BREW;
 
 macro_rules! parse_input {
     ($x:expr, $t:ident) => ($x.trim().parse::<$t>().unwrap())
+}
+
+enum Action {
+    BREW,
+}
+
+struct Receipe {
+    ingredients: [i32; 4],
+}
+
+struct Potion {
+    id: i32,
+    price: i32,
+    receipe: Receipe,
+}
+
+impl Potion {
+    fn output(&self) -> String {
+        self.id.to_string()
+    }
 }
 
 fn main() {
@@ -112,6 +133,7 @@ fn main() {
         let mut input_line = String::new();
         io::stdin().read_line(&mut input_line).unwrap();
         let action_count = parse_input!(input_line, i32); // the number of spells and recipes in play
+        let mut potions: Vec<Potion> = vec![];
         for i in 0..action_count as usize {
             let mut input_line = String::new();
             io::stdin().read_line(&mut input_line).unwrap();
@@ -127,6 +149,14 @@ fn main() {
             let tax_count = parse_input!(inputs[8], i32); // in the first two leagues: always 0; later: the amount of taxed tier-0 ingredients you gain from learning this spell
             let castable = parse_input!(inputs[9], i32); // in the first league: always 0; later: 1 if this is a castable player spell
             let repeatable = parse_input!(inputs[10], i32); // for the first two leagues: always 0; later: 1 if this is a repeatable player spell
+
+            let receipe = Receipe { ingredients: [delta_0, delta_1, delta_2, delta_3] };
+            let potion = Potion {
+                id: action_id,
+                price,
+                receipe
+            };
+            potions.push(potion);
         }
         for i in 0..2 as usize {
             let mut input_line = String::new();
@@ -144,7 +174,9 @@ fn main() {
 
 
         // in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
-        println!("BREW 0");
+        let action = BREW;
+        let filtered = potions.iter().filter(|p| p.);
+        println!("BREW {}", potions.get(0).unwrap().output());
     }
 
 }
