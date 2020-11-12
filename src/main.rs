@@ -169,7 +169,7 @@ fn main() {
             let castable = parse_input!(inputs[9], i32); // in the first league: always 0; later: 1 if this is a castable player spell
             let repeatable = parse_input!(inputs[10], i32); // for the first two leagues: always 0; later: 1 if this is a repeatable player spell
 
-            let receipe = Recipe { ingredients: [delta_0, delta_1, delta_2, delta_3] };
+            let receipe = Recipe { ingredients: [delta_0.abs(), delta_1.abs(), delta_2.abs(), delta_3.abs()] };
             let potion = Potion {
                 id: action_id,
                 price,
