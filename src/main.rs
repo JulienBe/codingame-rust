@@ -56,6 +56,9 @@ The game ends once at least one witch has brewed 2 potions.
 
 The game stops automatically after 100 rounds.
 
+# Victory Conditions
+
+The winner is the player with the most rupees.
 
 #  Game Protocol
 ## Input for One Game Turn
@@ -199,8 +202,13 @@ fn main() {
 
         // in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
         let action = BREW;
-        let can_brew: Vec<Potion> = potions.into_iter().filter(|p| my_stock.can_make(&p.recipe)).collect();
-        println!("BREW {}", can_brew.get(0).unwrap().output());
+        let mut can_brew: Vec<Potion> = potions.into_iter()
+            .filter(|p| my_stock.can_make(&p.recipe))
+            .collect();
+        can_brew.sort_by(|a, b| b.price.cmp(&a.price));
+        println!("BREW {}", can_brew
+            .get(0).unwrap()
+            .output());
     }
 
 }
