@@ -106,18 +106,34 @@ macro_rules! parse_input {
     ($x:expr, $t:ident) => ($x.trim().parse::<$t>().unwrap())
 }
 
+const INGREDIENTS_TIER: usize = 4;
+
 enum Action {
     BREW,
 }
 
-struct Receipe {
+struct Recipe {
     ingredients: [i32; 4],
+}
+struct Stock {
+    ingredients: [i32; 4],
+}
+
+impl Stock {
+    fn can_make(&self, recipe: &Recipe) -> bool {
+        for i in 0..INGREDIENTS_TIER {
+            if self.ingredients[i] < recipe.ingredients[i] {
+                return false
+            }
+        }
+        true
+    }
 }
 
 struct Potion {
     id: i32,
     price: i32,
-    receipe: Receipe,
+    recipe: Recipe,
 }
 
 impl Potion {
@@ -150,14 +166,17 @@ fn main() {
             let castable = parse_input!(inputs[9], i32); // in the first league: always 0; later: 1 if this is a castable player spell
             let repeatable = parse_input!(inputs[10], i32); // for the first two leagues: always 0; later: 1 if this is a repeatable player spell
 
-            let receipe = Receipe { ingredients: [delta_0, delta_1, delta_2, delta_3] };
+            let receipe = Recipe { ingredients: [delta_0, delta_1, delta_2, delta_3] };
             let potion = Potion {
                 id: action_id,
                 price,
-                receipe
+                recipe: receipe
             };
             potions.push(potion);
         }
+        let mut my_stock = Stock {
+            ingredients: [0, 0, 0, 0]
+        };
         for i in 0..2 as usize {
             let mut input_line = String::new();
             io::stdin().read_line(&mut input_line).unwrap();
@@ -167,6 +186,11 @@ fn main() {
             let inv_2 = parse_input!(inputs[2], i32);
             let inv_3 = parse_input!(inputs[3], i32);
             let score = parse_input!(inputs[4], i32); // amount of rupees
+            if i == 0 {
+                my_stock = Stock {
+                    ingredients: [inv_0, inv_1, inv_2, inv_3]
+                }
+            }
         }
 
         // Write an action using println!("message...");
@@ -175,8 +199,8 @@ fn main() {
 
         // in the first league: BREW <id> | WAIT; later: BREW <id> | CAST <id> [<times>] | LEARN <id> | REST | WAIT
         let action = BREW;
-        let filtered = potions.iter().filter(|p| p.);
-        println!("BREW {}", potions.get(0).unwrap().output());
+        let can_brew: Vec<Potion> = potions.into_iter().filter(|p| my_stock.can_make(&p.recipe)).collect();
+        println!("BREW {}", can_brew.get(0).unwrap().output());
     }
 
 }
