@@ -48,8 +48,8 @@ struct Action {
     a_type: ActionType,
     rank: i32,
     param: Pos,
-    entity: i32,
-    player: i32,
+    target_id: i32,
+    player_id: i32,
     player_pos: Pos,
     target_hp: i32,
     text: String,
@@ -57,13 +57,13 @@ struct Action {
 }
 
 impl Action {
-    fn new_wind(value: i32, target: Pos, my_hero: &Entity, role: HeroRole) -> Action {
+    fn new_wind(value: i32, wind_vector: &Pos, my_hero: &Entity, role: HeroRole) -> Action {
         Action {
             a_type: ActionType::Wind,
             rank: value,
-            param: target,
-            entity: 0,
-            player: my_hero.id,
+            param: wind_vector.clone(),
+            target_id: 0,
+            player_id: my_hero.id,
             player_pos: my_hero.pos.clone(),
             target_hp: 1,
             text: "ALL YOUR BASE ARE BELONG TO US".to_string(),
@@ -75,12 +75,38 @@ impl Action {
             a_type: ActionType::Shield,
             rank: value,
             param: target,
-            entity: target_entity.id,
-            player: my_hero.id,
+            target_id: target_entity.id,
+            player_id: my_hero.id,
             player_pos: my_hero.pos.clone(),
             target_hp: target_entity.hp,
             text: "WHAT YOU SAY".to_string(),
             role,
+        }
+    }
+    fn new_move(value: i32, target: Pos, target_entity: &Entity, my_hero: &Entity, role: HeroRole) -> Action {
+        Action {
+            a_type: ActionType::Move,
+            rank: value,
+            param: target,
+            target_id: target_entity.id,
+            player_id: my_hero.id,
+            player_pos: my_hero.pos.clone(),
+            target_hp: target_entity.hp,
+            text: "ATTACK!".to_string(),
+            role: HeroRole::Attack,
+        }
+    }
+    fn new_control(value: i32, target: Pos, target_entity: &Entity, my_hero: &Entity, role: HeroRole) -> Action {
+        Action {
+            a_type: ActionType::Control,
+            rank: value,
+            param: target,
+            target_id: target_entity.id,
+            player_id: my_hero.id,
+            player_pos: my_hero.pos.clone(),
+            target_hp: target_entity.hp,
+            text: "ASSUMING DIRECT CONTROL".to_string(),
+            role: HeroRole::Attack,
         }
     }
 }
@@ -196,6 +222,12 @@ impl Entity {
 
     }
 }
+impl PartialEq for Entity {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
 
 #[derive(Debug)]
 struct Stats {
@@ -239,8 +271,6 @@ impl Player {
     }
 }
 
-
-
 fn main() {
     let mut input_line = String::new();
     io::stdin().read_line(&mut input_line).unwrap();
@@ -265,7 +295,10 @@ fn main() {
     let mut input_line = String::new();
     io::stdin().read_line(&mut input_line).unwrap();
     let heroes_per_player = parse_input!(input_line, i32); // Always 3
-    eprintln!("My base {:?}. Other base {:?}", my_base, other_base);
+
+    /**
+     * PREPARATION
+     */
 
     let mut def_positions = vec![
         Pos { x: 5500.0,    y: 2500.0 },
@@ -307,6 +340,7 @@ fn main() {
 
     let mut def_stats = Stats::new();
     let mut att_stats = Stats::new();
+    let mut assumed_entities: Vec<Entity> = vec![];
     loop {
         let mut my_state = Player::new();
         let enemy_state = Player::new();
@@ -324,7 +358,23 @@ fn main() {
             e.threat_level_to_other = e.hp as f64 / turns_to_hit_other;
         });
 
-        let mut actions: Vec<Action> = compute_action(&my_base, &other_base, &mut my_state, &enemy_state, entities, &def_positions, &attack_positions, &wind_vectors, &other_base_edges);
+        assumed_entities.iter_mut().for_each(|e| e.hp -= DMG);
+        assumed_entities.retain(|assumed_entity| {
+            !entities.iter().any(|entity| entity.id == assumed_entity.id) && assumed_entity.hp >= DMG
+        });
+        assumed_entities.sort_by(|a, b| a.id.cmp(&b.id));
+        assumed_entities.dedup();
+
+        assumed_entities.iter_mut().for_each(|e| {
+            e.dst_from_base = e.pos.dst(&my_base);
+            let turns_to_hit = (e.dst_from_base - DST_TO_INFLICT_DMG_TO_BASE) as f64 / MONSTER_SPEED as f64;
+            e.threat_level = e.hp as f64 / turns_to_hit;
+
+            let turns_to_hit_other = (e.pos.dst(&other_base) - DST_TO_INFLICT_DMG_TO_BASE) as f64 / MONSTER_SPEED as f64;
+            e.threat_level_to_other = e.hp as f64 / turns_to_hit_other;
+        });
+        let mut actions: Vec<Action> = compute_action(&my_base, &other_base, &mut my_state, &enemy_state, &entities, &def_positions, &attack_positions, &wind_vectors, &other_base_edges, &assumed_entities);
+
 
         let mut selected_actions: Vec<Action> = Vec::new();
         while selected_actions.len() < 3 {
@@ -334,27 +384,54 @@ fn main() {
             selected_actions.push(selected_action);
         }
 
-        selected_actions.sort_by(|a, b| a.player.cmp(&b.player));
+//  ┌─┐┌─┐┌┬┐  ┌─┐┌┐┌  ┌─┐┌─┐┌┬┐┬┌─┐┌┐┌
+//  ├─┤│   │   │ ││││  ├─┤│   │ ││ ││││
+//  ┴ ┴└─┘ ┴   └─┘┘└┘  ┴ ┴└─┘ ┴ ┴└─┘┘└┘
+        selected_actions.sort_by(|a, b| a.player_id.cmp(&b.player_id));
         selected_actions.iter().for_each(|action| {
             Stats::process_action(&action.role, &mut def_stats, &mut att_stats, &action);
             match action.a_type {
                 ActionType::Move => println!("MOVE {} {} {:?}", action.param.x as i32, action.param.y as i32, action.role),
                 ActionType::Wind => {
-                    println!("SPELL WIND {} {} {:?}", action.param.x as i32, action.param.y as i32, action.role);
+                    // Param is the wind vector so I can more easily (re)compute next ideal position
+                    println!("SPELL WIND {} {} {:?}", (action.param.x + action.player_pos.x) as i32, (action.param.y + action.player_pos.y) as i32, action.role);
+                    my_state.mana -= SPELL_COST;
+                    entities.iter()
+                        .filter(|e| e.id != action.player_id && e.pos.dst(&action.player_pos) < WIND_DST)
+                        .for_each(|e| {
+                            let entity = e.clone();
+                            entity.pos.add(&action.param);
+                            assumed_entities.push(entity);
+                        })
+                }
+                ActionType::Control => {
+                    println!("SPELL CONTROL {} {} {} {:?}", action.target_id, action.param.x, action.param.y, action.role);
                     my_state.mana -= SPELL_COST;
                 }
-                ActionType::Control => println!("SPELL CONTROL {} {} {} {:?}", action.entity, action.param.x, action.param.y, action.role),
-                ActionType::Shield => println!("SPELL SHIELD {} {:?}", action.entity, action.role),
+                ActionType::Shield => {
+                    println!("SPELL SHIELD {} {:?}", action.target_id, action.role);
+                    my_state.mana -= SPELL_COST;
+                }
                 ActionType::Wait => println!("WAIT"),
             }
         });
-        eprintln!("defense {:?}, attack {:?}", def_stats, att_stats)
+        entities.iter().filter(|e| e.hp > 2).for_each(|e| {
+            let mut entity = e.clone();
+            entity.pos = entity.next_pos(1.0);
+            assumed_entities.push(entity);
+        });
+        eprintln!("def{:?}, att{:?}", def_stats, att_stats)
     }
 }
 
+
+
+//  ╔═╗╔╦╗╔═╗╔═╗╔╦╗
+//  ╠═╣ ║║╠═╣╠═╝ ║
+//  ╩ ╩═╩╝╩ ╩╩   ╩
 fn update_on_selected_action(actions: &mut Vec<Action>, selected_action: &Action, base: &Pos, my_state: &mut Player, wind_vectors: &Vec<Pos>) {
     actions.retain(|action| {
-        action.player != selected_action.player
+        action.player_id != selected_action.player_id
     });
     actions.iter_mut().for_each(|action| {
         // cannot cast another spell
@@ -375,7 +452,7 @@ fn update_on_selected_action(actions: &mut Vec<Action>, selected_action: &Action
             action.rank /= 2;
         }
         // Control the same entity
-        if selected_action.a_type == ActionType::Control && action.a_type == ActionType::Control && selected_action.entity == action.entity {
+        if selected_action.a_type == ActionType::Control && action.a_type == ActionType::Control && selected_action.target_id == action.target_id {
             action.rank = -10000;
         }
         if action.a_type == ActionType::Move && action.param.dst(&selected_action.param) < MVT_SPEED {
@@ -388,10 +465,12 @@ fn update_on_selected_action(actions: &mut Vec<Action>, selected_action: &Action
     });
 }
 
-/**
-WE ARE GOING TO HAVE TO ACT IF WE WANT TO LIVE IN A DIFFERENT WORLD
- */
-fn compute_action(my_base: &Pos, other_base: &Pos, my_state: &mut Player, enemy_state: &Player, entities: Vec<Entity>, def_positions: &Vec<Pos>, attack_positions: &Vec<Pos>, wind_vectors: &Vec<Pos>, other_base_edges: &Vec<Pos>) -> Vec<Action> {
+
+
+//  ╦ ╦╔═╗  ╔═╗╦═╗╔═╗  ╔═╗╔═╗╦╔╗╔╔═╗  ╔╦╗╔═╗  ╦ ╦╔═╗╦  ╦╔═╗  ╔╦╗╔═╗  ╔═╗╔═╗╔╦╗  ╦╔═╗  ╦ ╦╔═╗  ╦ ╦╔═╗╔╗╔╔╦╗  ╔╦╗╔═╗  ╦  ╦╦  ╦╔═╗  ╦╔╗╔  ╔═╗  ╔╦╗╦╔═╗╔═╗╔═╗╦═╗╔═╗╔╗╔╔╦╗  ╦ ╦╔═╗╦═╗╦  ╔╦╗
+//  ║║║║╣   ╠═╣╠╦╝║╣   ║ ╦║ ║║║║║║ ╦   ║ ║ ║  ╠═╣╠═╣╚╗╔╝║╣    ║ ║ ║  ╠═╣║   ║   ║╠╣   ║║║║╣   ║║║╠═╣║║║ ║    ║ ║ ║  ║  ║╚╗╔╝║╣   ║║║║  ╠═╣   ║║║╠╣ ╠╣ ║╣ ╠╦╝║╣ ║║║ ║   ║║║║ ║╠╦╝║   ║║
+//  ╚╩╝╚═╝  ╩ ╩╩╚═╚═╝  ╚═╝╚═╝╩╝╚╝╚═╝   ╩ ╚═╝  ╩ ╩╩ ╩ ╚╝ ╚═╝   ╩ ╚═╝  ╩ ╩╚═╝ ╩   ╩╚    ╚╩╝╚═╝  ╚╩╝╩ ╩╝╚╝ ╩    ╩ ╚═╝  ╩═╝╩ ╚╝ ╚═╝  ╩╝╚╝  ╩ ╩  ═╩╝╩╚  ╚  ╚═╝╩╚═╚═╝╝╚╝ ╩   ╚╩╝╚═╝╩╚═╩═╝═╩╝
+fn compute_action(my_base: &Pos, other_base: &Pos, my_state: &mut Player, enemy_state: &Player, entities: &Vec<Entity>, def_positions: &Vec<Pos>, attack_positions: &Vec<Pos>, wind_vectors: &Vec<Pos>, other_base_edges: &Vec<Pos>, assumed_entities: &Vec<Entity>) -> Vec<Action> {
     let mut player_entities: Vec<Entity> = entities.iter().filter(|entity| entity.entity_type == EntityType::MyHero).cloned().collect();
     let enemy_entities: Vec<Entity> = entities.iter().filter(|entity| entity.entity_type == EntityType::OtherHero).cloned().collect();
     let monsters: Vec<Entity> = entities.iter().filter(|entity| entity.entity_type == EntityType::Monster).cloned().collect();
@@ -407,57 +486,54 @@ fn compute_action(my_base: &Pos, other_base: &Pos, my_state: &mut Player, enemy_
 
     player_entities.iter().for_each(|player| {
         match player.hero_role {
-            HeroRole::Attack => compute_player_attack_action(&player, my_base, other_base, my_state, &player_entities, &enemy_entities, &monsters, def_positions, attack_positions, &mut actions, &wind_vectors, &other_base_edges),
+            HeroRole::Attack => {
+                let attack_actions = compute_player_attack_action(&player, my_base, other_base, my_state, &player_entities, &enemy_entities, &monsters, def_positions, attack_positions, &wind_vectors, &other_base_edges, assumed_entities);
+                actions.extend(attack_actions);
+            },
             _ => compute_player_defensive_action(&player, my_base, other_base, my_state, &enemy_state, &player_entities, &enemy_entities, &monsters, def_positions, attack_positions, &mut actions, &wind_vectors, &other_base_edges),
         }
     });
     actions
 }
 
-/**
-PREPARE TO ATTACK
- */
-fn compute_player_attack_action(my_hero: &Entity, my_base: &Pos, other_base: &Pos, my_state: &mut Player, players: &Vec<Entity>, other_heroes: &Vec<Entity>, monsters: &Vec<Entity>, def_positions: &Vec<Pos>, attack_positions: &Vec<Pos>, actions: &mut Vec<Action>, wind_vectors: &Vec<Pos>, other_base_edges: &Vec<Pos>) {
-    // ATTACK RESTING POSITION
-    let mut resting_action = Action {
-        a_type: ActionType::Move,
-        rank: my_hero.pos.dst(&attack_positions[0]) / 4,
-        param: attack_positions[0].clone(),
-        entity: -1,
-        player: my_hero.id,
-        player_pos: my_hero.pos.clone(),
-        target_hp: 1,
-        text: "ATTACK".to_string(),
-        role: HeroRole::Attack,
-    };
+//  ╔═╗╔╦╗╔═╗╔╗╔   ┬   ╔═╗╔╦╗╔╦╗╔═╗╔═╗╦╔═
+//  ╠═╣║║║║╣ ║║║  ┌┼─  ╠═╣ ║  ║ ╠═╣║  ╠╩╗
+//  ╩ ╩╩ ╩╚═╝╝╚╝  └┘   ╩ ╩ ╩  ╩ ╩ ╩╚═╝╩ ╩
+fn compute_player_attack_action(my_hero: &Entity, my_base: &Pos, other_base: &Pos, my_state: &mut Player, players: &Vec<Entity>, other_heroes: &Vec<Entity>, monsters: &Vec<Entity>, def_positions: &Vec<Pos>, attack_positions: &Vec<Pos>, wind_vectors: &Vec<Pos>, other_base_edges: &Vec<Pos>, assumed_entities: &Vec<Entity>) -> Vec<Action> {
+    let mut actions: Vec<Action> = vec![];
+//  ┬─┐┌─┐┌─┐┌┬┐┬┌┐┌┌─┐  ┌─┐┌─┐┌─┐┬┌┬┐┬┌─┐┌┐┌
+//  ├┬┘├┤ └─┐ │ │││││ ┬  ├─┘│ │└─┐│ │ ││ ││││
+//  ┴└─└─┘└─┘ ┴ ┴┘└┘└─┘  ┴  └─┘└─┘┴ ┴ ┴└─┘┘└┘
+    let position = &attack_positions[0];
+    let mut resting_action = Action::new_move(my_hero.pos.dst(position) / 3, position.clone(), my_hero, my_hero, HeroRole::Attack);
     if my_hero.pos.dst(my_base) < my_hero.pos.dst(other_base) {
         resting_action.rank *= 2;
     }
     actions.push(resting_action);
-    // ATTACK SPELL
+//  ┌─┐┌─┐┌─┐┌─┐┌┐┌┌─┐┬┬  ┬┌─┐  ┌─┐┌─┐┌─┐┬  ┬  ┌─┐
+//  │ │├┤ ├┤ ├┤ │││└─┐│└┐┌┘├┤   └─┐├─┘├┤ │  │  └─┐
+//  └─┘└  └  └─┘┘└┘└─┘┴ └┘ └─┘  └─┘┴  └─┘┴─┘┴─┘└─┘
     if my_state.mana > SPELL_COST {
         let defenders: Vec<Entity> = other_heroes.iter().filter(|e| e.pos.dst(other_base) < BASE_TARGET_DST).cloned().collect();
-        // ATTACK CONTROL
+//  ┌─┐┌─┐┌┐┌┌┬┐┬─┐┌─┐┬
+//  │  │ ││││ │ ├┬┘│ ││
+//  └─┘└─┘┘└┘ ┴ ┴└─└─┘┴─┘
         monsters.iter()
             .filter(|m| m.threat_for != ThreatFor::OtherBase && m.shield_life <= 0 && m.pos.dst(&my_hero.pos) < CONTROL_DST)
             .for_each(|m| {
-                let mut value = 100 * (m.hp - defenders.len() as i32 * 10);
+                let mut value = 400 * (m.hp - 12);
                 // Make it go to the enemy base
                 if m.threat_for == ThreatFor::Me {
+                    value *= 4;
+                }
+                if my_state.mana > SPELL_COST * 5 {
                     value *= 2;
                 }
-                actions.push(Action {
-                    a_type: ActionType::Control,
-                    rank: value,
-                    param: other_base.clone(),
-                    entity: m.id,
-                    player: my_hero.id,
-                    player_pos: my_hero.pos.clone(),
-                    target_hp: m.hp,
-                    text: "ATTACK".to_string(),
-                    role: HeroRole::Attack,
-                });
+                Action::new_control(value, other_base.clone(), m, my_hero, HeroRole::Attack);
             });
+//  ┌─┐┬ ┬┬┌─┐┬  ┌┬┐
+//  └─┐├─┤│├┤ │   ││
+//  └─┘┴ ┴┴└─┘┴─┘─┴┘
         // enemy_state.mana > SPELL_COST &&  => spells are applied to the targets and will only be effective on the next turn, after the next batch of commands. Does not protect from a spell from this same turn.
         if other_heroes.iter().any(|e| e.pos.dst(other_base) < BASE_TARGET_DST) {
             monsters.iter()
@@ -470,7 +546,9 @@ fn compute_player_attack_action(my_hero: &Entity, my_base: &Pos, other_base: &Po
                 });
         }
 
-        // ATTACK WIND
+//  ┬ ┬┬┌┐┌┌┬┐
+//  │││││││ ││
+//  └┴┘┴┘└┘─┴┘
         let wind_monsters: Vec<Entity> = monsters.iter().filter(|m| {
             m.pos.dst(&my_hero.pos) < WIND_DST && m.shield_life == 0
         }).cloned().collect();
@@ -480,56 +558,49 @@ fn compute_player_attack_action(my_hero: &Entity, my_base: &Pos, other_base: &Po
             // Try to make it closer to the enemy base
             // But really, they should land within base target distance
             wind_monsters.iter().for_each(|m| {
-                let winded_dst_from_enemy_base = m.pos.add(wind_vector).dst(&other_base);
-                wind_value += (m.pos.dst(&other_base) - winded_dst_from_enemy_base) as f64 * m.threat_level_to_other;
-                wind_value /= 5.0;
+                let winded_dst_other_base = m.pos.add(wind_vector).dst(&other_base);
+                wind_value += (m.pos.dst(&other_base) - winded_dst_other_base) as f64 * m.threat_level_to_other;
+                wind_value /= 3.0;
                 // or try to make go into the enemy base target distance for an otherwise non threatening monster
-                if winded_dst_from_enemy_base < BASE_TARGET_DST {
-                    wind_value *= 3.0;
+                if winded_dst_other_base < BASE_TARGET_DST {
+                    wind_value *= 4.0;
                     if m.threat_for != ThreatFor::OtherBase {
                         wind_value *= 3.0;
                     }
                 }
+                if m.near_base == 1 {
+                    wind_value *= 2.0;
+                }
             });
-            if my_state.mana < SPELL_COST * 3 {
-                wind_value /= 4.0;
-            }
-            actions.push(Action::new_wind(wind_value as i32, my_hero.pos.add(wind_vector), my_hero, HeroRole::Attack))
+            actions.push(Action::new_wind(wind_value as i32, &wind_vector, my_hero, HeroRole::Attack))
         });
     }
-    // ATTACK MOVE
-    // target the nearest mob that is not a threat to the enemy base.
+//  ┌┬┐┌─┐┬  ┬┌─┐
+//  ││││ │└┐┌┘├┤
+//  ┴ ┴└─┘ └┘ └─┘
     monsters.iter().for_each(|m| {
-        if m.threat_for != ThreatFor::OtherBase {
-            actions.push(Action {
-                a_type: ActionType::Move,
-                rank: (600 * m.hp) - ((m.pos.dst(&my_hero.pos) - 600)),
-                param: m.pos.clone(),
-                entity: m.id,
-                player: my_hero.id,
-                player_pos: my_hero.pos.clone(),
-                target_hp: m.hp,
-                text: "ATTACK".to_string(),
-                role: HeroRole::Attack,
-            });
-        }
+        let mut value = 10000;
+        value -= m.pos.dst(&other_base);
+        actions.push(Action::new_move(value, m.pos.clone(), m, my_hero, HeroRole::Attack));
     });
-    // target an enemy that maybe be gaining some mana
-    other_heroes.iter()
-        .filter(|e| e.pos.dst(other_base) < e.pos.dst(my_base))
-        .for_each(|e| {
-            actions.push(Action {
-                a_type: ActionType::Move,
-                rank: 5000,
-                param: e.pos.clone(),
-                entity: e.id,
-                player: my_hero.id,
-                player_pos: my_hero.pos.clone(),
-                target_hp: e.hp,
-                text: "ALL YOUR BASE ARE BELONG TO US".to_string(),
-                role: HeroRole::Attack,
-            });
-        })
+    // I think that there is one that is worth winding !!
+    if my_state.mana > SPELL_COST {
+        monsters.iter().filter(|e| {
+            // I can't wind it, and it's closer to the enemy base than I am
+            e.pos.dst(&my_hero.pos) > WIND_DST && e.pos.dst(&other_base) < my_hero.pos.dst(&other_base)
+        }).for_each(|e| {
+            actions.push(Action::new_move((1000.0 * e.threat_level_to_other) as i32, e.pos.clone(), e, my_hero, HeroRole::Attack))
+        });
+        assumed_entities.iter().filter(|e| {
+            eprintln!("Maybe {:?}", e);
+            // I can't wind it, and it's closer to the enemy base than I am
+            e.pos.dst(&my_hero.pos) > WIND_DST && e.pos.dst(&other_base) < my_hero.pos.dst(&other_base)
+        }).for_each(|e| {
+            actions.push(Action::new_move((1000.0 * e.threat_level_to_other) as i32, e.pos.clone(), e, my_hero, HeroRole::Attack))
+        });
+    }
+    //actions.iter().for_each(|a| eprintln!("{:?}", a));
+    actions
 }
 
 /**
@@ -548,8 +619,8 @@ fn compute_player_defensive_action(my_hero: &Entity, base: &Pos, other_base: &Po
         a_type: ActionType::Move,
         rank: my_hero.pos.dst(&rest_position) / 4,
         param: rest_position,
-        entity: -1,
-        player: my_hero.id,
+        target_id: -1,
+        player_id: my_hero.id,
         player_pos: my_hero.pos.clone(),
         target_hp: 1,
         text: "DEFENSE".to_string(),
@@ -582,8 +653,8 @@ fn compute_player_defensive_action(my_hero: &Entity, base: &Pos, other_base: &Po
             a_type: ActionType::Move,
             rank: value,
             param: m.next_pos(0.5),
-            entity: m.id,
-            player: my_hero.id,
+            target_id: m.id,
+            player_id: my_hero.id,
             player_pos: my_hero.pos.clone(),
             target_hp: m.hp,
             text: "DEFENSE".to_string(),
@@ -621,8 +692,8 @@ fn compute_player_defensive_action(my_hero: &Entity, base: &Pos, other_base: &Po
                 a_type: ActionType::Control,
                 rank: value as i32,
                 param: target_pos,
-                entity: m.id,
-                player: my_hero.id,
+                target_id: m.id,
+                player_id: my_hero.id,
                 player_pos: my_hero.pos.clone(),
                 target_hp: m.hp,
                 text: "DEFENSE".to_string(),
@@ -667,7 +738,7 @@ fn compute_player_defensive_action(my_hero: &Entity, base: &Pos, other_base: &Po
                 }
                 wind_value /= 5;
             });
-            actions.push(Action::new_wind(wind_value, my_hero.pos.add(wind_vector), my_hero, HeroRole::Defense))
+            actions.push(Action::new_wind(wind_value, &wind_vector, my_hero, HeroRole::Defense))
         });
     }
 }
