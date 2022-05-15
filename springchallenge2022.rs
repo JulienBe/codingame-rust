@@ -176,7 +176,8 @@ struct Entity {
     velocity_y: i32,
     near_base: i32,
     threat_for: ThreatFor,
-    dst_from_base: i32,
+    dst_from_my_base: i32,
+    dst_from_other_base: i32,
     hero_role: HeroRole,
     threat_level: f64,
     threat_level_to_other: f64,
@@ -206,7 +207,8 @@ impl Entity {
                 2 => ThreatFor::OtherBase,
                 _ => ThreatFor::None,
             },
-            dst_from_base: 99999,
+            dst_from_my_base: 99999,
+            dst_from_other_base: 99999,
             hero_role: HeroRole::NoRole,
             threat_level: 1.0,
             threat_level_to_other: 1.0,
@@ -350,11 +352,12 @@ fn main() {
         let entity_count: i32 = parse_input!(input_line, i32); // Amount of heros and monsters you can see
         let mut entities: Vec<Entity> = (0..entity_count).map(|_| Entity::new()).collect::<Vec<_>>();
         entities.iter_mut().for_each(|e| {
-            e.dst_from_base = e.pos.dst(&my_base);
-            let turns_to_hit = (e.dst_from_base - DST_TO_INFLICT_DMG_TO_BASE) as f64 / MONSTER_SPEED as f64;
+            e.dst_from_my_base = e.pos.dst(&my_base);
+            e.dst_from_other_base = e.pos.dst(&other_base);
+            let turns_to_hit = (e.dst_from_my_base - DST_TO_INFLICT_DMG_TO_BASE) as f64 / MONSTER_SPEED as f64;
             e.threat_level = e.hp as f64 / turns_to_hit;
 
-            let turns_to_hit_other = (e.pos.dst(&other_base) - DST_TO_INFLICT_DMG_TO_BASE) as f64 / MONSTER_SPEED as f64;
+            let turns_to_hit_other = (e.dst_from_other_base - DST_TO_INFLICT_DMG_TO_BASE) as f64 / MONSTER_SPEED as f64;
             e.threat_level_to_other = e.hp as f64 / turns_to_hit_other;
         });
 
@@ -366,8 +369,9 @@ fn main() {
         assumed_entities.dedup();
 
         assumed_entities.iter_mut().for_each(|e| {
-            e.dst_from_base = e.pos.dst(&my_base);
-            let turns_to_hit = (e.dst_from_base - DST_TO_INFLICT_DMG_TO_BASE) as f64 / MONSTER_SPEED as f64;
+            e.dst_from_my_base = e.pos.dst(&my_base);
+            e.dst_from_other_base = e.pos.dst(&other_base);
+            let turns_to_hit = (e.dst_from_my_base - DST_TO_INFLICT_DMG_TO_BASE) as f64 / MONSTER_SPEED as f64;
             e.threat_level = e.hp as f64 / turns_to_hit;
 
             let turns_to_hit_other = (e.pos.dst(&other_base) - DST_TO_INFLICT_DMG_TO_BASE) as f64 / MONSTER_SPEED as f64;
@@ -631,7 +635,7 @@ fn compute_player_defensive_action(my_hero: &Entity, base: &Pos, other_base: &Po
     // DEFENSE ATTACKING
     monsters.iter().for_each(|m| {
         let mut value = match m.threat_for {
-            ThreatFor::Me => (HALF_TERRAIN_DST - m.dst_from_base) * 2,
+            ThreatFor::Me => (HALF_TERRAIN_DST - m.dst_from_my_base) * 2,
             ThreatFor::OtherBase => 0,
             ThreatFor::None => PLAYER_DMG_DST,
         };
@@ -663,14 +667,14 @@ fn compute_player_defensive_action(my_hero: &Entity, base: &Pos, other_base: &Po
     });
 
     let near_base_monsters: Vec<Entity> = monsters.iter().filter(|m| {
-        m.dst_from_base < BASE_TARGET_DST + MONSTER_SPEED
+        m.dst_from_my_base < BASE_TARGET_DST + MONSTER_SPEED
     }).cloned().collect();
     // DEFENSE CASTING
     if my_state.mana > SPELL_COST {
         // DEFENSE SHIELD
         if my_hero.shield_life <= 1 && enemy_state.mana > SPELL_COST {
             let base_monsters: Vec<Entity> = monsters.iter().filter(|m| {
-                m.dst_from_base < BASE_TARGET_DST
+                m.dst_from_my_base < BASE_TARGET_DST
             }).cloned().collect();
             // can an enemy control me on the next turn ?
             if other_heroes.iter().any(|e| e.pos.dst(&my_hero.pos) < CONTROL_DST) && !base_monsters.is_empty() {
@@ -684,7 +688,7 @@ fn compute_player_defensive_action(my_hero: &Entity, base: &Pos, other_base: &Po
             // AWAY FROM BASE let's assume it's going to hit.
             let mut value = 250.0 * m.threat_level;
             // Here we want it to go away
-            if m.dst_from_base < (DST_TO_INFLICT_DMG_TO_BASE + (MONSTER_SPEED as f64 * (m.hp as f64 / 2.0)) as i32) {
+            if m.dst_from_my_base < (DST_TO_INFLICT_DMG_TO_BASE + (MONSTER_SPEED as f64 * (m.hp as f64 / 2.0)) as i32) {
                 value *= 15.0;
             }
             let target_pos = other_base.clone();
@@ -725,15 +729,15 @@ fn compute_player_defensive_action(my_hero: &Entity, base: &Pos, other_base: &Po
             let mut wind_value = 0;
             wind_monsters.iter().for_each(|m| {
                 let winded_base_dst = m.pos.add(wind_vector).dst(&base);
-                wind_value += (winded_base_dst - m.dst_from_base) * (m.hp as f64) as i32;
+                wind_value += (winded_base_dst - m.dst_from_my_base) * (m.hp as f64) as i32;
                 // it loses its target which is great because it will pick a new orientation at random
-                if winded_base_dst > BASE_TARGET_DST && m.dst_from_base < BASE_TARGET_DST {
+                if winded_base_dst > BASE_TARGET_DST && m.dst_from_my_base < BASE_TARGET_DST {
                     wind_value *= 4;
                 }
                 if m.threat_for != ThreatFor::Me {
                     wind_value /= 8;
                 }
-                if m.dst_from_base > BASE_TARGET_DST {
+                if m.dst_from_my_base > BASE_TARGET_DST {
                     wind_value /= 8;
                 }
                 wind_value /= 5;
